@@ -1,5 +1,6 @@
 package de.ivu.arn.helper;
 
+import static de.ivu.arn.helper.MutinyTracingHelper.wrapWithSpan;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -38,13 +39,11 @@ class MutinyTracingHelperTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(MutinyTracingHelperTest.class);
 
-    MutinyTracingHelper mutinyTracingHelper;
-
     private InMemorySpanExporter spanExporter;
     private Tracer tracer;
 
     @Inject
-    Vertx vertx;
+    private Vertx vertx;
 
     @BeforeEach
     public void setup() {
@@ -56,9 +55,7 @@ class MutinyTracingHelperTest {
                 .build();
         OpenTelemetrySdk.builder().setTracerProvider(tracerProvider).buildAndRegisterGlobal();
 
-        tracer = GlobalOpenTelemetry.getTracer(MutinyTracingHelper.class.getName());
-
-        mutinyTracingHelper = new MutinyTracingHelper(tracer);
+        tracer = GlobalOpenTelemetry.getTracer(MutinyTracingHelperTest.class.getName());
     }
 
     @ParameterizedTest(name = "{index}: Simple uni pipeline {1}")
@@ -69,7 +66,7 @@ class MutinyTracingHelperTest {
                 .item("Hello")
                 .emitOn(r -> contextRunner.runOnContext(r, vertx))
                 .onItem()
-                .transformToUni(m -> mutinyTracingHelper.wrapWithSpan(Optional.empty(), "testSpan",
+                .transformToUni(m -> wrapWithSpan(tracer, Optional.empty(), "testSpan",
                         Uni.createFrom().item(m).onItem().transform(s -> {
                             final Span span = tracer.spanBuilder("subspan").startSpan();
                             try (final Scope scope = span.makeCurrent()) {
@@ -104,7 +101,7 @@ class MutinyTracingHelperTest {
                 .item("test")
                 .emitOn(r -> contextRunner.runOnContext(r, vertx))
                 .onItem()
-                .transformToUni(m -> mutinyTracingHelper.wrapWithSpan("testSpan",
+                .transformToUni(m -> wrapWithSpan(tracer, "testSpan",
                         Uni.createFrom().item(m)
                                 .onItem().invoke(s -> doSomething(s))
                                 .onItem().transformToUni(s -> doSomethingAsync(s))
@@ -144,11 +141,10 @@ class MutinyTracingHelperTest {
 
     public Uni<Void> doSomethingAsync(final String string){
         return Uni.createFrom().item(string)
-                .onItem().transformToUni(m -> mutinyTracingHelper.wrapWithSpan(Optional.of(
+                .onItem().transformToUni(m -> wrapWithSpan(tracer, Optional.of(
                                 io.opentelemetry.context.Context.current()), "doSomethingAsync",
                         Uni.createFrom().item(m)
-                                .onItem().invoke(s -> LOG.info("do something async with {}", s))
-                ))
+                                .onItem().invoke(s -> LOG.info("do something async with {}", s))))
                 .replaceWithVoid();
     }
 
@@ -160,7 +156,7 @@ class MutinyTracingHelperTest {
                 .items("test1", "test2", "test3")
                 .emitOn(r -> contextRunner.runOnContext(r, vertx))
                 .onItem()
-                .transformToUniAndConcatenate(m -> mutinyTracingHelper.wrapWithSpan(Optional.empty(), "testSpan " + m,
+                .transformToUniAndConcatenate(m -> wrapWithSpan(tracer, Optional.empty(), "testSpan " + m,
                         //the traced pipeline
                         Uni.createFrom().item(m).onItem().transform(s -> {
                             final Span span = tracer.spanBuilder("subspan " + s).startSpan();
@@ -199,7 +195,7 @@ class MutinyTracingHelperTest {
                 .items("test1", "test2", "test3")
                 .emitOn(r -> contextRunner.runOnContext(r, vertx))
                 .onItem()
-                .transformToUniAndMerge(m -> mutinyTracingHelper.wrapWithSpan(Optional.empty(), "testSpan " + m,
+                .transformToUniAndMerge(m -> wrapWithSpan(tracer, Optional.empty(), "testSpan " + m,
                         Uni.createFrom().item(m).onItem().transform(s -> {
                             final Span span = tracer.spanBuilder("subspan " + s).startSpan();
                             try (final Scope scope = span.makeCurrent()) {
